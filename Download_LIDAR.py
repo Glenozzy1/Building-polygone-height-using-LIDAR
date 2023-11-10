@@ -2,68 +2,168 @@ import os
 import pandas as pd
 import requests
 import time
+from os import walk
+import multiprocessing as mp
+
+
+# from shapely.geometry import Polygon, Point
 
 # import a list of files from https://apps.nationalmap.gov/downloader/
 # Elevation Source Data (3DEP) - Lidar, IfSAR
 # Create a shopping cart and save as a CSV file
 # Column R should have the web address of the file it should look something like this
-# "https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/USGS_Lidar_Point_Cloud_NJ_SdL5_2014_LAS_2015/laz/18TWK610835.laz"
+# "S_Lidar_Point_Cloud_NJ_SdL5_2014_LAS_https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/USG2015/laz/18TWK610835.laz"
 # Point the software to the location of the file
 
-ShoppingCart = "/media/glen/GIS_Data/Lidar/data.csv"
-LIDAR_directory = "/media/glen/GIS_Data/Lidar/"
-#path_building_geojson = '/media/glen/GIS_Data/Building_Polygons/Building GEO-JSON/Virginia.geojson'
-#LIDAR_Coverage_Polygons_DIR = "/media/glen/GIS_Data/LIDAR_Coverage_Polygons/"
-#path_State_geojson = "/media/glen/GIS_Data/US_States/us_state_20m.shp"
-#path_County_geojson = "/media/glen/GIS_Data/us_county/us_county_20m.shp"
-#path_Urban_Area_geojson = "/media/glen/GIS_Data/Urban Areas/us_ua10_500k.shp"
 
-if __name__ == '__main__':
-    # Step 1 get a list of LIDAR file we have
+def Multiprocessing_Download(URL, file_name):
+    try:
+        r = requests.get(URL, allow_redirects=True)
+    except IOError as e:
+        print("An error occurred:", e)
+        time.sleep(30)  # Sleep for 30 seconds
+        r = requests.get(URL, allow_redirects=True)
+    if r.reason == 'Service Unavailable':
+        print("URL=" + URL + ' Service Unavailable')
+    elif r.status_code == 200:
+        open(file_name, 'wb').write(r.content)
+        print("File " + file_name + " added to REPO")
+    elif r.status_code == 404:
+        print("URL=" + URL + ' File not found Error 404')
+    else:
+        print("An error occurred:", e)
+    return
+
+
+def Download_from_Cart_LIDAR(ShoppingCart, LIDAR_XML, LIDAR_directory):
+    dir_list_ShoppingCart = os.listdir(ShoppingCart)
+    MasterList = pd.DataFrame(columns=['Name', 'XML_Link', 'Catalog', 'File_Link', 'Last_Update'])
+
+    for file in dir_list_ShoppingCart:
+        if ".csv" in file:
+            LIDAR_Shopping_Cart_DF = pd.read_csv(ShoppingCart + file, header=None)
+            LIDAR_Shopping_Cart_DF = LIDAR_Shopping_Cart_DF[[0, 4, 6, 14, 24]]
+            LIDAR_Shopping_Cart_DF.columns = ['Name', 'XML_Link', 'Catalog', 'File_Link', 'Last_Update']
+            MasterList = pd.concat([MasterList, LIDAR_Shopping_Cart_DF])
+
+    # Step 1 get a list of Lidar files we have
+    All_files_in_LIDAR_REPO = []
+    for (dir_path, dir_names, file_names) in walk(LIDAR_directory):
+        All_files_in_LIDAR_REPO.extend(file_names)
     list_of_files_in_LIDAR_REPO = []
-    for file in os.listdir(LIDAR_directory):
-        # check if current path is a file
-        if os.path.isfile(os.path.join(LIDAR_directory, file)):
-            if file[-4:] == ".laz":
-                list_of_files_in_LIDAR_REPO.append(file)
-
-    # Step 2 open CSV file that contains or shopping Cart
-    LIDAR_Shopping_Cart_DF = pd.read_csv(ShoppingCart, header=None)
-    # looks like 20 contains the URL we need
-    # convert it to a list
-    LIDAR_URL_list = list(LIDAR_Shopping_Cart_DF[17])
-    # were going to create a new dataframe from 2 list using a for loop
-    LIDAR_file_name = []
-    for URL in LIDAR_URL_list:
-        LIDAR_file_name.append(URL.rsplit('/', 1)[1])
-    LIDAR_URL_list_DF = pd.DataFrame(list(zip(LIDAR_file_name, LIDAR_URL_list)), columns=['file_name', 'URL'])
-    LIDAR_URL_list_DF['Download'] = False
+    for file in All_files_in_LIDAR_REPO:
+        if file[-4:] == ".laz":
+            # Strip off the .laz so we can use it on XML list
+            file = file.replace(".laz", "")
+            list_of_files_in_LIDAR_REPO.append(file)
+    print("Number of Files currently in LIDAR REPO = {}".format(len(list_of_files_in_LIDAR_REPO)))
 
     # Step 3 compare list to create our dataframe of needed downloads setting Column Download to True
-    for index in LIDAR_URL_list_DF.index:
-        if LIDAR_URL_list_DF["file_name"][index] not in list_of_files_in_LIDAR_REPO:
-            LIDAR_URL_list_DF.at[index, "Download"] = True
+    # LAZ files
+    MasterList.reset_index()
+    MasterList['Download_LAZ'] = None
+    for index in MasterList.index:
+        Just_File_Name = os.path.basename(MasterList.iloc[index]['File_Link'])
+        MasterList.at[index, 'Name'] = Just_File_Name.replace(".laz", "")
+        if MasterList.iloc[index]['Name'] not in list_of_files_in_LIDAR_REPO:
+            MasterList.at[index, "Download_LAZ"] = True
+        else:
+            MasterList.at[index, "Download_LAZ"] = False
 
-    # Step 4 now create a list of only files we want to download
-    # select from data frame only rows where download = true
-    LIDAR_URL_list_DF = LIDAR_URL_list_DF.loc[LIDAR_URL_list_DF['Download'] == True]
-    List_of_URL_to_download = list(LIDAR_URL_list_DF['URL'])
-    del (LIDAR_Shopping_Cart_DF, LIDAR_file_name, LIDAR_URL_list_DF, LIDAR_URL_list, list_of_files_in_LIDAR_REPO, ShoppingCart)
+    # get a list of all file in XML REPO
+    list_LIDAR_XML = os.listdir(LIDAR_XML)
+    list_of_files_in_XML_REPO = []
+    for file in list_LIDAR_XML:
+        if file[-4:] == ".xml":
+            # Strip off the .xml so we can use it on XML list
+            file = file.replace(".xml", "")
+            list_of_files_in_XML_REPO.append(file)
+
+    # we need to fix the XML links by replacing LAZ with Metadata
+    # format of request
+    # https://www.sciencebase.gov/catalog/item/download/64390eb1d34ee8d4ade0af15?format = json"
+    # https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/IL_4_County_QL1_LiDAR_2016_B16/IL_4County_Kane_2018/metadata/USGS_LPC_IL_4_County_QL1_LiDAR_2016_B16_LAS_00008175.xml
+    # https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/IL_4_County_QL1_LiDAR_2016_B16/IL_4County_Kane_2018/LAZ/USGS_LPC_IL_4_County_QL1_LiDAR_2016_B16_LAS_00759725.laz
+
+    MasterList['Download_XML'] = None
+    for index in MasterList.index:
+        if MasterList.iloc[index]['Name'] in list_of_files_in_XML_REPO:
+            MasterList.at[index, "Download_XML"] = False
+        else:
+            MasterList.at[index, "Download_XML"] = True
+
+    for index in MasterList.index:
+        LAZ_Link = MasterList.iloc[index]['File_Link']
+        XML_Link = ""
+        if "/LAZ/" in LAZ_Link:  # upper lower case problems on linux
+            XML_Link = LAZ_Link.replace("/LAZ/", "/metadata/")
+        if "/laz/" in LAZ_Link:
+            XML_Link = LAZ_Link.replace("/laz/", "/metadata/")
+        XML_Link = XML_Link.replace(".laz", "_meta.xml")
+        MasterList.at[index, "XML_Link"] = XML_Link
 
     # Step 5 download our files
-    for URL in List_of_URL_to_download:
-        if URL.find('/'):
-            file_name = URL.rsplit('/', 1)[1]
-            file_name = LIDAR_directory + file_name
-            try:
-                r = requests.get(URL, allow_redirects=True)
-            except IOError as e:
-                print("An error occurred:", e)
-                time.sleep(30)  # Sleep for 30 seconds
-                r = requests.get(URL, allow_redirects=True)
-            if r.reason == 'Service Unavailable':
-                print("URL=" + URL + ' Service Unavailable')
-            else:  # I don't like the logic on this will look into changing
-                open(file_name, 'wb').write(r.content)
-                print("File " + file_name + " added to REPO")
-            time.sleep(5)  # Sleep for 2 seconds
+    # for index in MasterList.index:
+    #     if MasterList.iloc[index]["Download_XML"]:
+    #         URL = MasterList.iloc[index]["XML_Link"]
+    #         if URL.find('/'):
+    #             file_name = LIDAR_XML + MasterList.iloc[index]['Name'] + ".xml"
+    #             try:
+    #                 r = requests.get(URL, allow_redirects=True)
+    #             except IOError as e:
+    #                 print("An error occurred:", e)
+    #                 time.sleep(30)  # Sleep for 30 seconds
+    #                 r = requests.get(URL, allow_redirects=True)
+    #             if r.reason == 'Service Unavailable':
+    #                 print("URL=" + URL + ' Service Unavailable')
+    #             elif r.status_code == 200:
+    #                 open(file_name, 'wb').write(r.content)
+    #                 print("File " + file_name + " added to REPO")
+    #             elif r.status_code == 404:
+    #                 URL = URL.replace("_meta.xml", ".xml")
+    #                 try:
+    #                     r = requests.get(URL, allow_redirects=True)
+    #                 except IOError as e:
+    #                     print("An error occurred:", e)
+    #                 if r.status_code == 200:
+    #                     open(file_name, 'wb').write(r.content)
+    #                     print("File " + file_name + " added to REPO")
+    #             else:
+    #                 print("An error occurred:", e)
+
+    # ***********************************************************************************************************
+
+
+
+    for index in MasterList.index:
+        if MasterList.iloc[index]["Download_LAZ"]:
+            URL = MasterList.iloc[index]["File_Link"]
+            if URL.find('/'):
+                file_name = LIDAR_directory + MasterList.iloc[index]['Name'] + ".laz"
+
+                # try:
+                #    r = requests.get(URL, allow_redirects=True)
+                # except IOError as e:
+                #    print("An error occurred:", e)
+                #    time.sleep(30)  # Sleep for 30 seconds
+                #    r = requests.get(URL, allow_redirects=True)
+                # if r.reason == 'Service Unavailable':
+                #    print("URL=" + URL + ' Service Unavailable')
+                # elif r.status_code == 200:
+                #    open(file_name, 'wb').write(r.content)
+                #    print("File " + file_name + " added to REPO")
+                # elif r.status_code == 404:
+                #    URL = URL.replace("_meta.xml", ".xml")
+                # try:
+                #    r = requests.get(URL, allow_redirects=True)
+                # except IOError as e:
+                #    print("An error occurred:", e)
+                # if r.status_code == 200:
+                #    open(file_name, 'wb').write(r.content)
+                #    print("File " + file_name + " added to REPO")
+                # else:
+                #    print("An error occurred:", e)
+
+
+
+    return

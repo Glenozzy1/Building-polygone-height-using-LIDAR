@@ -2,59 +2,55 @@ import os
 import pandas as pd
 import requests
 import time
+from os import walk
 
 # import a list of files from https://apps.nationalmap.gov/downloader/
-# Elevation Source Data (3DEP) - Lidar, IfSAR
+# Elevation Source Data (3DEP) - Tiff
 # Create a shopping cart and save as a CSV file
-# Column R should have the web address of the file it should look something like this
-# "https://rockyweb.usgs.gov/vdelivery/Datasets/Staged/Elevation/LPC/Projects/USGS_Lidar_Point_Cloud_NJ_SdL5_2014_LAS_2015/laz/18TWK610835.laz"
-# Point the software to the location of the file
+# Column O should have the web address of the file it should look something like this
+# "https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/1m/Projects/MD_Western_2021_D21/Tiff/USGS_1M_17_x75y437_MD_Western_2021_D21.tif"
 
-ShoppingCart = "/media/glen/GIS_Data/Lidar/data.csv"
-LIDAR_directory = "/media/glen/GIS_Data/Lidar/"
-#path_building_geojson = '/media/glen/GIS_Data/Building_Polygons/Building GEO-JSON/Virginia.geojson'
-#LIDAR_Coverage_Polygons_DIR = "/media/glen/GIS_Data/LIDAR_Coverage_Polygons/"
-#path_State_geojson = "/media/glen/GIS_Data/US_States/us_state_20m.shp"
-#path_County_geojson = "/media/glen/GIS_Data/us_county/us_county_20m.shp"
-#path_Urban_Area_geojson = "/media/glen/GIS_Data/Urban Areas/us_ua10_500k.shp"
+def Download_from_Cart_GeoTiff(ShoppingCart, OneMeterGeoTiff_directory):
 
-if __name__ == '__main__':
-    # Step 1 get a list of LIDAR file we have
-    list_of_files_in_LIDAR_REPO = []
-    for file in os.listdir(LIDAR_directory):
-        # check if current path is a file
-        if os.path.isfile(os.path.join(LIDAR_directory, file)):
-            if file[-4:] == ".laz":
-                list_of_files_in_LIDAR_REPO.append(file)
+    # Step 1 get a list of GeoTiff file we have
+    All_files_in_GeoTiff_REPO = []
+    for (dir_path, dir_names, file_names) in walk(OneMeterGeoTiff_directory):
+        All_files_in_GeoTiff_REPO.extend(file_names)
+    list_of_files_in_GeoTiff_REPO = []
+    for file in All_files_in_GeoTiff_REPO:
+        if file[-4:] == ".tif":
+            list_of_files_in_GeoTiff_REPO.append(file)
+    print("Number of Files currently in GeoTiff REPO = {}".format(len(list_of_files_in_GeoTiff_REPO)))
 
     # Step 2 open CSV file that contains or shopping Cart
-    LIDAR_Shopping_Cart_DF = pd.read_csv(ShoppingCart, header=None)
-    # looks like 20 contains the URL we need
+    GeoTiff_Shopping_Cart_DF = pd.read_csv(ShoppingCart, header=None)
+    # looks like 17 contains the URL we need
     # convert it to a list
-    LIDAR_URL_list = list(LIDAR_Shopping_Cart_DF[17])
+    GeoTiff_URL_list = list(GeoTiff_Shopping_Cart_DF[14])
     # were going to create a new dataframe from 2 list using a for loop
-    LIDAR_file_name = []
-    for URL in LIDAR_URL_list:
-        LIDAR_file_name.append(URL.rsplit('/', 1)[1])
-    LIDAR_URL_list_DF = pd.DataFrame(list(zip(LIDAR_file_name, LIDAR_URL_list)), columns=['file_name', 'URL'])
-    LIDAR_URL_list_DF['Download'] = False
+    GeoTiff_file_name = []
+    for URL in GeoTiff_URL_list:
+        GeoTiff_file_name.append(URL.rsplit('/', 1)[1])
+    GeoTiff_URL_list_DF = pd.DataFrame(list(zip(GeoTiff_file_name, GeoTiff_URL_list)), columns=['file_name', 'URL'])
+    GeoTiff_URL_list_DF['Download'] = False
+    print("Number of Links in Shopping cart = {}".format(len(GeoTiff_URL_list_DF)))
 
     # Step 3 compare list to create our dataframe of needed downloads setting Column Download to True
-    for index in LIDAR_URL_list_DF.index:
-        if LIDAR_URL_list_DF["file_name"][index] not in list_of_files_in_LIDAR_REPO:
-            LIDAR_URL_list_DF.at[index, "Download"] = True
+    for index in GeoTiff_URL_list_DF.index:
+        if GeoTiff_URL_list_DF["file_name"][index] not in list_of_files_in_GeoTiff_REPO:
+            GeoTiff_URL_list_DF.at[index, "Download"] = True
 
     # Step 4 now create a list of only files we want to download
     # select from data frame only rows where download = true
-    LIDAR_URL_list_DF = LIDAR_URL_list_DF.loc[LIDAR_URL_list_DF['Download'] == True]
-    List_of_URL_to_download = list(LIDAR_URL_list_DF['URL'])
-    del (LIDAR_Shopping_Cart_DF, LIDAR_file_name, LIDAR_URL_list_DF, LIDAR_URL_list, list_of_files_in_LIDAR_REPO, ShoppingCart)
+    GeoTiff_URL_list_DF = GeoTiff_URL_list_DF.loc[GeoTiff_URL_list_DF['Download'] == True]
+    List_of_URL_to_download = list(GeoTiff_URL_list_DF['URL'])
+    print("Number of Files to Download GeoTiff = {}".format(len(List_of_URL_to_download)))
 
     # Step 5 download our files
     for URL in List_of_URL_to_download:
         if URL.find('/'):
             file_name = URL.rsplit('/', 1)[1]
-            file_name = LIDAR_directory + file_name
+            file_name = OneMeterGeoTiff_directory + file_name
             try:
                 r = requests.get(URL, allow_redirects=True)
             except IOError as e:
@@ -67,3 +63,17 @@ if __name__ == '__main__':
                 open(file_name, 'wb').write(r.content)
                 print("File " + file_name + " added to REPO")
             time.sleep(5)  # Sleep for 2 seconds
+
+    return
+
+
+def Sort_GeoTiffR(OneMeterGeoTiff_directory):
+    # Step 1 get a list of LIDAR file we have
+    All_files_in_GeoTiff_REPO = os.listdir(OneMeterGeoTiff_directory)
+    print("Number of Files currently in LIDAR REPO = {}".format(len(All_files_in_GeoTiff_REPO)))
+    for file in All_files_in_GeoTiff_REPO:
+
+        if file[-4:] == ".laz":
+            #las = laspy.read(LIDAR_directory + file)
+            crs = ""
+    return
